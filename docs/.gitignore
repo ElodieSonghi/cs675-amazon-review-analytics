@@ -1,0 +1,21 @@
+# Raw and processed datasets
+data/
+*.jsonl
+*.jsonl.gz
+*.parquet
+*.csv
+
+# Python files
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Jupyter Notebook files
+.ipynb_checkpoints/
+
+# Mac system files
+.DS_Store
+
+# Environment and secret files
+.env
