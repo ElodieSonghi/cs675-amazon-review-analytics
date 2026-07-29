@@ -1,0 +1,6 @@
+product_popularity_bin,product_count,avg_rating_stddev,avg_extreme_rating_percent
+Under 10 ratings,56854,1.014,72.89
+50-199 ratings,13014,1.232,74.93
+1000+ ratings,686,1.249,75.99
+10-49 ratings,38001,1.109,74.23
+200-999 ratings,4010,1.268,75.83
