@@ -1,5 +1,203 @@
+import argparse
+import os
+from urllib.parse import urlparse
+
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
+
+
+DEFAULT_REVIEWS_PATH = "/home/jovyan/work/data/raw/All_Beauty.jsonl"
+DEFAULT_METADATA_PATH = "/home/jovyan/work/data/raw/meta_All_Beauty.jsonl"
+DEFAULT_PROCESSED_OUTPUT_BASE = "/home/jovyan/work/data/processed"
+DEFAULT_RESULTS_OUTPUT_BASE = "/home/jovyan/work/results"
+
+REQUIRED_REVIEW_COLUMNS = {
+    "parent_asin",
+    "asin",
+    "user_id",
+    "rating",
+    "title",
+    "text",
+    "timestamp",
+    "helpful_vote",
+    "verified_purchase"
+}
+REQUIRED_METADATA_COLUMNS = {
+    "parent_asin",
+    "title",
+    "main_category",
+    "price",
+    "average_rating",
+    "rating_number",
+    "store"
+}
+
+
+def parse_args(argv=None):
+    """Parse input and output paths supplied on the command line."""
+    parser = argparse.ArgumentParser(
+        description=(
+            "Clean, join, and analyze Amazon review and product metadata "
+            "with PySpark."
+        )
+    )
+    parser.add_argument(
+        "--reviews-input",
+        default=DEFAULT_REVIEWS_PATH,
+        help=(
+            "Review JSONL input path. Supports local paths and s3:// URIs. "
+            f"Default: {DEFAULT_REVIEWS_PATH}"
+        )
+    )
+    parser.add_argument(
+        "--metadata-input",
+        default=DEFAULT_METADATA_PATH,
+        help=(
+            "Product metadata JSONL input path. Supports local paths and "
+            f"s3:// URIs. Default: {DEFAULT_METADATA_PATH}"
+        )
+    )
+    parser.add_argument(
+        "--processed-output-base",
+        default=DEFAULT_PROCESSED_OUTPUT_BASE,
+        help=(
+            "Base directory or s3:// prefix for processed Parquet outputs. "
+            f"Default: {DEFAULT_PROCESSED_OUTPUT_BASE}"
+        )
+    )
+    parser.add_argument(
+        "--results-output-base",
+        default=DEFAULT_RESULTS_OUTPUT_BASE,
+        help=(
+            "Base directory or s3:// prefix for analytical CSV outputs. "
+            f"Default: {DEFAULT_RESULTS_OUTPUT_BASE}"
+        )
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        validate_path_arguments(args)
+    except ValueError as error:
+        parser.error(str(error))
+
+    return args
+
+
+def join_path(base_path, child_path):
+    """Join a child name to a local path or URI without changing its scheme."""
+    return f"{base_path.rstrip('/')}/{child_path}"
+
+
+def normalize_path(path):
+    """Normalize a local path or supported URI for safety comparisons."""
+    stripped_path = path.strip()
+    if not stripped_path:
+        raise ValueError("Paths cannot be empty.")
+
+    parsed_path = urlparse(stripped_path)
+    if parsed_path.scheme:
+        scheme = parsed_path.scheme.lower()
+        if scheme not in {"file", "s3"}:
+            raise ValueError(
+                f"Unsupported path scheme '{parsed_path.scheme}' in "
+                f"'{stripped_path}'. Use a local path, file:// URI, or "
+                "s3:// URI."
+            )
+        if scheme == "s3" and not parsed_path.netloc:
+            raise ValueError(
+                f"S3 path '{stripped_path}' must include a bucket name."
+            )
+        if parsed_path.query or parsed_path.fragment:
+            raise ValueError(
+                f"Path '{stripped_path}' cannot contain a query or fragment."
+            )
+        normalized_uri = (
+            f"{scheme}://{parsed_path.netloc}{parsed_path.path}"
+        )
+        return normalized_uri.rstrip("/")
+
+    absolute_path = os.path.abspath(stripped_path)
+    if absolute_path == os.path.sep:
+        return absolute_path
+    return absolute_path.rstrip("/")
+
+
+def paths_overlap(first_path, second_path):
+    """Return whether two normalized paths are equal or nested."""
+    first_normalized = normalize_path(first_path)
+    second_normalized = normalize_path(second_path)
+
+    return (
+        first_normalized == second_normalized
+        or first_normalized.startswith(f"{second_normalized}/")
+        or second_normalized.startswith(f"{first_normalized}/")
+    )
+
+
+def validate_path_arguments(args):
+    """Reject unsupported or unsafe combinations of input/output paths."""
+    named_paths = {
+        "--reviews-input": args.reviews_input,
+        "--metadata-input": args.metadata_input,
+        "--processed-output-base": args.processed_output_base,
+        "--results-output-base": args.results_output_base
+    }
+
+    for option_name, path in named_paths.items():
+        try:
+            normalize_path(path)
+        except ValueError as error:
+            raise ValueError(f"{option_name}: {error}") from error
+
+    if paths_overlap(
+        args.processed_output_base,
+        args.results_output_base
+    ):
+        raise ValueError(
+            "--processed-output-base and --results-output-base must be "
+            "different, non-overlapping locations because Spark overwrites "
+            "output directories."
+        )
+
+    output_paths = [
+        join_path(args.processed_output_base, "reviews_clean.parquet"),
+        join_path(args.processed_output_base, "metadata_clean.parquet"),
+        join_path(args.processed_output_base, "joined_reviews.parquet"),
+        join_path(args.results_output_base, "verified_analysis"),
+        join_path(args.results_output_base, "length_analysis"),
+        join_path(args.results_output_base, "popularity_analysis"),
+        join_path(args.results_output_base, "polarization_analysis")
+    ]
+    for input_option in ("reviews_input", "metadata_input"):
+        input_path = getattr(args, input_option)
+        for output_path in output_paths:
+            if paths_overlap(input_path, output_path):
+                raise ValueError(
+                    f"--{input_option.replace('_', '-')} cannot overlap "
+                    f"output location '{output_path}'."
+                )
+
+
+def validate_required_columns(dataframe, required_columns, dataset_name):
+    """Raise a helpful error when an input dataset has missing columns."""
+    missing_columns = sorted(required_columns - set(dataframe.columns))
+    if missing_columns:
+        missing_list = ", ".join(missing_columns)
+        raise ValueError(
+            f"{dataset_name} input is missing required columns: "
+            f"{missing_list}."
+        )
+
+
+def read_json_input(spark, path, dataset_name):
+    """Read JSON input and add context to Spark's low-level error message."""
+    try:
+        return spark.read.json(path)
+    except Exception as error:
+        raise RuntimeError(
+            f"Unable to read {dataset_name} input from '{path}'. Check that "
+            "the path exists and that Spark has permission to read it."
+        ) from error
 
 
 def create_spark_session() -> SparkSession:
@@ -302,37 +500,56 @@ def run_analyses(joined_df):
 
 
 def main() -> None:
+    args = parse_args()
     spark = create_spark_session()
 
     spark.conf.set("spark.sql.caseSensitive", "true")
 
-    reviews_path = "/home/jovyan/work/data/raw/All_Beauty.jsonl"
-    metadata_path = "/home/jovyan/work/data/raw/meta_All_Beauty.jsonl"
+    reviews_path = args.reviews_input
+    metadata_path = args.metadata_input
 
-    reviews_output_path = (
-        "/home/jovyan/work/data/processed/reviews_clean.parquet"
+    reviews_output_path = join_path(
+        args.processed_output_base,
+        "reviews_clean.parquet"
     )
-    metadata_output_path = (
-        "/home/jovyan/work/data/processed/metadata_clean.parquet"
+    metadata_output_path = join_path(
+        args.processed_output_base,
+        "metadata_clean.parquet"
     )
-    joined_output_path = (
-        "/home/jovyan/work/data/processed/joined_reviews.parquet"
+    joined_output_path = join_path(
+        args.processed_output_base,
+        "joined_reviews.parquet"
     )
-    verified_results_path = (
-        "/home/jovyan/work/results/verified_analysis"
+    verified_results_path = join_path(
+        args.results_output_base,
+        "verified_analysis"
     )
-    length_results_path = (
-        "/home/jovyan/work/results/length_analysis"
+    length_results_path = join_path(
+        args.results_output_base,
+        "length_analysis"
     )
-    popularity_results_path = (
-        "/home/jovyan/work/results/popularity_analysis"
+    popularity_results_path = join_path(
+        args.results_output_base,
+        "popularity_analysis"
     )
-    polarization_results_path = (
-        "/home/jovyan/work/results/polarization_analysis"
+    polarization_results_path = join_path(
+        args.results_output_base,
+        "polarization_analysis"
     )
 
-    reviews_df = spark.read.json(reviews_path)
-    metadata_df = spark.read.json(metadata_path)
+    reviews_df = read_json_input(spark, reviews_path, "reviews")
+    metadata_df = read_json_input(spark, metadata_path, "metadata")
+
+    validate_required_columns(
+        reviews_df,
+        REQUIRED_REVIEW_COLUMNS,
+        "Reviews"
+    )
+    validate_required_columns(
+        metadata_df,
+        REQUIRED_METADATA_COLUMNS,
+        "Metadata"
+    )
 
     print("Raw reviews:", reviews_df.count())
     print("Raw metadata rows:", metadata_df.count())

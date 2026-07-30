@@ -85,6 +85,31 @@ cd /home/jovyan/work
 spark-submit src/amazon_reviews_pipeline.py
 A successful run ends with:
 Parquet and CSV outputs written successfully.
+
+Command-Line Paths
+The default command above still uses the existing local input and output
+locations. To use different local paths or S3 locations, pass all four path
+options:
+
+spark-submit src/amazon_reviews_pipeline.py \
+    --reviews-input /path/to/reviews.jsonl \
+    --metadata-input /path/to/metadata.jsonl \
+    --processed-output-base /path/to/processed \
+    --results-output-base /path/to/results
+
+The same options accept `s3://bucket/prefix` paths when Spark is running in an
+AWS environment with permission to access that bucket.
+
+Local Smoke Test
+From a terminal inside the running Docker container, run:
+
+bash scripts/run_local_smoke_test.sh
+
+The script creates three tiny review records and one matching metadata record
+under `/tmp`, runs the complete Spark pipeline, verifies all seven expected
+output folders, and deletes the temporary files when it finishes. It does not
+write test data or generated outputs into the repository.
+
 Outputs
 Processed Parquet datasets are saved to:
 data/processed/reviews_clean.parquet
@@ -109,6 +134,5 @@ run the Spark solution on cloud infrastructure
 save cloud outputs to S3
 document runtime, configuration, cost, and results
 make the full workflow reproducible from this repository
-
 
 
