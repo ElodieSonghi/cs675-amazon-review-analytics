@@ -122,22 +122,31 @@ role to EMR Serverless. Do not commit the role ARN; represent it as
 
 ## Pre-Deployment Gates
 
-Complete these checks before creating the paid full-scale job:
+The local full-scale input validation completed successfully on July 30, 2026.
+The complete results and reproduction command are in
+[`data-validation.md`](data-validation.md).
 
-1. Confirm exact review and metadata schemas for both selected categories.
-2. Count duplicate `parent_asin` values across the combined metadata files.
-   The current pipeline does not deduplicate metadata, so duplicate keys could
-   multiply review rows during the join. If duplicates exist, agree on a
-   deterministic rule and test that change locally before cloud deployment.
-3. Decide whether the helpful-vote cap of 13 should remain a fixed local-study
+Completed gates:
+
+1. Both selected review and metadata files match the expected schemas and
+   contain no malformed rows or null join keys.
+2. All 10,954,065 combined metadata `parent_asin` values are unique, including
+   across category files. A metadata-deduplication rule is not required.
+3. A deterministic sample of 133,683 reviews achieved 100% metadata join
+   coverage.
+4. The exact Spark review count is 133,443,290, exceeding the 100-million-row
+   requirement.
+
+Complete these remaining decisions and checks before the paid full-scale job:
+
+1. Decide whether the helpful-vote cap of 13 should remain a fixed local-study
    value or be recomputed from the full dataset.
-4. Decide whether the fixed review-age reference date of `2023-09-09` remains
+2. Decide whether the fixed review-age reference date of `2023-09-09` remains
    appropriate.
-5. Keep verified-purchase analysis unchanged for the first reproducibility
+3. Keep verified-purchase analysis unchanged for the first reproducibility
    run. It currently uses all years. The 2018-2022 restriction should be a
    separately approved analytical change, not mixed into deployment work.
-6. Confirm sufficient join coverage with a sample from every category.
-7. Confirm that no raw data, Parquet output, log, AWS CLI profile, or secret is
+4. Confirm that no raw data, Parquet output, log, AWS CLI profile, or secret is
    staged in Git.
 
 ## Low-Cost Execution Sequence

@@ -110,6 +110,16 @@ under `/tmp`, runs the complete Spark pipeline, verifies all seven expected
 output folders, and deletes the temporary files when it finishes. It does not
 write test data or generated outputs into the repository.
 
+Full-Scale Data Validation
+Before uploading the 100M+ datasets to S3, run:
+
+spark-submit scripts/validate_full_dataset.py
+
+The validator checks complete row counts, malformed records, critical null
+values, metadata-key uniqueness, and deterministic sampled join coverage.
+Full-scale validation results and reproduction instructions are documented in
+`docs/data-validation.md`.
+
 Outputs
 Processed Parquet datasets are saved to:
 data/processed/reviews_clean.parquet
@@ -134,5 +144,4 @@ run the Spark solution on cloud infrastructure
 save cloud outputs to S3
 document runtime, configuration, cost, and results
 make the full workflow reproducible from this repository
-
 
