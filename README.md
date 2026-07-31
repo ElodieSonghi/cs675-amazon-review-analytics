@@ -8,8 +8,10 @@ The local solution cleans review and product metadata, engineers analytical feat
 
 ## Current Status
 
-- Step 00: Local Spark solution completed
-- Step 01: Cloud deployment and 100M+ row run not yet completed
+The local pipeline, validation script, and smoke tests are complete. I also ran
+the full pipeline on AWS EMR Serverless with more than 100 million reviews. The
+cloud run finished successfully and the small result tables are included in
+this repository.
 
 ## Local Dataset
 
@@ -60,7 +62,7 @@ The project includes four main analyses:
 
 ## Repository Structure
 
-
+```text
 data/
     raw/
     processed/
@@ -71,77 +73,135 @@ results/
 src/
     amazon_reviews_pipeline.py
 README.md
+```
 
-Local Environment
+## Local Environment
+
 The project runs inside a Docker container using the Jupyter PySpark image.
 The local project folder is mounted into the container at:
 
+```text
 /home/jovyan/work
-Running the Pipeline
+```
+
+## Running the Pipeline
+
 Start the Docker container and open a terminal inside JupyterLab.
 Then run:
 
+```bash
 cd /home/jovyan/work
 spark-submit src/amazon_reviews_pipeline.py
-A successful run ends with:
-Parquet and CSV outputs written successfully.
+```
 
-Command-Line Paths
+A successful run ends with:
+
+```text
+Parquet and CSV outputs written successfully.
+```
+
+## Command-Line Paths
+
 The default command above still uses the existing local input and output
 locations. To use different local paths or S3 locations, pass all four path
 options:
 
+```bash
 spark-submit src/amazon_reviews_pipeline.py \
     --reviews-input /path/to/reviews.jsonl \
     --metadata-input /path/to/metadata.jsonl \
     --processed-output-base /path/to/processed \
     --results-output-base /path/to/results
+```
 
 The same options accept `s3://bucket/prefix` paths when Spark is running in an
 AWS environment with permission to access that bucket.
 
-Local Smoke Test
+## Local Smoke Test
+
 From a terminal inside the running Docker container, run:
 
+```bash
 bash scripts/run_local_smoke_test.sh
+```
 
 The script creates three tiny review records and one matching metadata record
 under `/tmp`, runs the complete Spark pipeline, verifies all seven expected
 output folders, and deletes the temporary files when it finishes. It does not
 write test data or generated outputs into the repository.
 
-Full-Scale Data Validation
+## Full-Scale Data Validation
+
 Before uploading the 100M+ datasets to S3, run:
 
+```bash
 spark-submit scripts/validate_full_dataset.py
+```
 
 The validator checks complete row counts, malformed records, critical null
 values, metadata-key uniqueness, and deterministic sampled join coverage.
 Full-scale validation results and reproduction instructions are documented in
 `docs/data-validation.md`.
 
-Outputs
+## Outputs
+
 Processed Parquet datasets are saved to:
+
+```text
 data/processed/reviews_clean.parquet
 data/processed/metadata_clean.parquet
 data/processed/joined_reviews.parquet
+```
+
 Analysis results are saved as CSV output folders:
+
+```text
 results/verified_analysis
 results/length_analysis
 results/popularity_analysis
 results/polarization_analysis
+```
+
 Each Spark CSV output folder contains a file beginning with part-00000 and a _SUCCESS marker.
-Notebook and Script Roles
+
+I copied the four small result tables from the AWS run to
+`results/cloud_full/`. The raw JSONL files and generated Parquet files are too
+large for Git, so they are still excluded.
+
+## Cloud-Scale Run
+
+For the cloud run, I stored the data in S3 and ran the PySpark script with EMR
+Serverless. I used two review categories and their matching metadata:
+
+- `Clothing_Shoes_and_Jewelry`
+- `Home_and_Kitchen`
+
+Spark reported these counts:
+
+- raw reviews: 133,443,290
+- clean reviews after deduplication: 132,084,185
+- metadata rows: 10,954,065
+- joined reviews: 132,084,185
+
+The final run took 3,874 seconds, or 64 minutes 34 seconds, on EMR 7.13.0. It
+wrote three Parquet datasets and four CSV result tables to S3. Based on the
+reported vCPU and memory use, I estimate the EMR compute cost at about $1.30
+before credits. This does not include the much smaller S3 charges.
+
+The AWS setup, retry, and commands are documented in
+[`docs/cloud-plan.md`](docs/cloud-plan.md).
+
+## Notebook and Script Roles
+
 The notebook is used for exploratory analysis, data validation, and preprocessing decisions.
-The Python script is the reproducible end-to-end pipeline used for local execution and future cloud deployment.
+The Python script is the reproducible end-to-end pipeline used for both local
+execution and the completed AWS cloud deployment.
 
-Step 01 Plan
-The next phase will:
-store the full-scale datasets in Amazon S3
-process at least 100 million rows
-use at least two joinable datasets
-run the Spark solution on cloud infrastructure
-save cloud outputs to S3
-document runtime, configuration, cost, and results
-make the full workflow reproducible from this repository
+## Assignment Requirements
 
+- The project uses Spark locally and on AWS.
+- The full run processed 133,443,290 raw review rows.
+- Reviews were joined to product metadata with `parent_asin`.
+- Parquet and CSV outputs were written to S3.
+- The repository includes the local tests, validation method, AWS settings,
+  runtime, results, and cost estimate.

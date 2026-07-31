@@ -123,19 +123,23 @@ spark-submit scripts/validate_full_dataset.py \
 Bucket names, AWS account identifiers, role ARNs, and credentials must not be
 hard-coded in the repository.
 
-## Interpretation and Remaining Checks
+## Cloud Result
 
 The selected inputs passed the local structural, scale, metadata-key, and
 sample-join checks. No metadata deduplication rule is required for these two
 files.
 
-The following checks remain part of the cloud run:
+The AWS run later confirmed the following:
 
-- exact clean-review count after review deduplication;
-- exact joined-review count and full join coverage;
-- processed Parquet output counts;
-- four analytical result tables;
-- Spark configuration, runtime, logs, and cost evidence.
+- exact clean-review count after deduplication: 132,084,185;
+- exact joined-review count: 132,084,185;
+- full cleaned-review join retention: 100%;
+- all three processed Parquet outputs completed;
+- all four analytical result tables completed;
+- I recorded the Spark settings, runtime, logs, resource use, estimated cost,
+  and automatic shutdown.
+
+See [`cloud-plan.md`](cloud-plan.md) for the full execution record.
 
 The validation does not change analytical choices. In particular, the
 verified-purchase analysis still uses all years, the helpful-vote cap remains

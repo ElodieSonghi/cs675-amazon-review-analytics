@@ -1,184 +1,104 @@
-# AWS Cloud-Scale Plan
+# AWS Cloud Run
 
-## Status and Guardrail
+## Goal
 
-The local argument refactor and temporary-data smoke test have passed. This
-document is a deployment plan only: no AWS resources have been created.
-Provisioning should begin only after the remaining full-scale data checks in
-this document are resolved.
+My goal was to run the existing PySpark pipeline on AWS without changing its
+analysis logic. The assignment required at least 100 million review rows and a
+second dataset that could be joined to the reviews.
 
-Never place AWS access keys, session tokens, account IDs, role ARNs, bucket
-names containing private information, or `.env` files in Git. Use an AWS CLI
-profile or short-lived AWS credentials outside the repository.
+I used these Amazon Reviews 2023 categories:
 
-## Recommended Architecture
+- `Clothing_Shoes_and_Jewelry`
+- `Home_and_Kitchen`
+- the matching metadata file for each category
 
-Use Amazon S3 for storage and Amazon EMR Serverless for the required batch
-PySpark run:
+Together, the two review files contain 133,443,290 rows. The two metadata files
+contain 10,954,065 rows. Reviews and metadata are joined with `parent_asin`.
+
+## AWS Setup
+
+I used this flow:
 
 ```text
-Amazon Reviews 2023 review JSONL
-        + matching product metadata JSONL
-                        |
-                        v
-S3 data/raw/reviews/ and data/raw/metadata/
-                        |
-                        v
-EMR Serverless Spark application
-                        |
-             +----------+----------+
-             |                     |
-             v                     v
-S3 data/processed/          S3 results/ and logs/
-             |
-             v
-Optional Athena SQL validation over processed Parquet
+Amazon review JSONL + product metadata JSONL
+                     |
+                     v
+                Private S3 bucket
+                     |
+                     v
+             EMR Serverless (Spark)
+                     |
+              +------+------+
+              |             |
+              v             v
+       Processed Parquet   CSV results and logs
 ```
 
-EMR Serverless is the preferred compute service because this project already
-has a batch-style `spark-submit` application. It accepts a PySpark entry point
-from S3, passes command-line arguments to it, supports S3 job logs, and permits
-explicit driver, executor, and scaling limits. See the official
-[EMR Serverless Spark job documentation](https://docs.aws.amazon.com/emr/latest/EMR-Serverless-UserGuide/jobs-spark.html).
-
-Athena for Apache Spark is a valid alternative, but it is oriented around
-interactive sessions and notebooks. Its driver is billed for the entire
-session as well as worker calculations. AWS's current pricing example uses
-$0.35 per DPU-hour. For this one-off reproducible batch job, EMR Serverless
-provides a closer match and avoids paying for an accidentally idle notebook
-session. Athena SQL can still be useful after the run for small validation
-queries. See [Athena pricing](https://aws.amazon.com/athena/pricing/).
-
-This recommendation is based on workload fit, not a guaranteed fixed price.
-EMR Serverless charges for worker vCPU, memory, and configured storage while
-workers are active, with a one-minute minimum. Actual regional prices must be
-checked in the [official EMR pricing page](https://aws.amazon.com/emr/pricing/)
-or AWS Pricing Calculator immediately before deployment.
-
-## Full-Scale Dataset
-
-The official Amazon Reviews 2023 release contains 571.54 million reviews and
-matching item metadata. The project page also confirms that `parent_asin` is
-the intended review-to-metadata join key. See the
-[Amazon Reviews 2023 dataset documentation](https://amazon-reviews-2023.github.io/).
-
-Recommended initial selection:
-
-- `Clothing_Shoes_and_Jewelry`: approximately 66.0 million reviews
-- `Home_and_Kitchen`: approximately 67.4 million reviews
-- the matching metadata file for each category
-- expected raw review total: approximately 133.4 million rows
-
-This provides a comfortable margin above the 100-million-row requirement
-without processing all 571.54 million reviews. Record the exact raw count
-reported by Spark; the published category counts are planning estimates, not
-the final evidence for the assignment.
-
-The source downloads are commonly compressed JSONL files. A small number of
-large gzip objects gives Spark too little input parallelism because a gzip
-stream cannot normally be divided among many Spark tasks. Before the paid run,
-decompress and divide each review dataset into multiple reasonably sized JSONL
-objects, then upload those pieces under the review prefix. Do the same for very
-large metadata files if necessary. Keep these raw pieces outside Git.
-
-## S3 Layout
-
-Use one private bucket in the same AWS Region as EMR Serverless:
+The S3 bucket used the following folders:
 
 ```text
 s3://<bucket-name>/
     code/
-        amazon_reviews_pipeline.py
-    data/
-        raw/
-            reviews/
-            metadata/
-        processed/
+    data/raw/reviews/
+    data/raw/metadata/
+    data/processed/
     results/
     logs/
 ```
 
-Keep all four S3 Block Public Access settings enabled. AWS recommends this for
-private data workloads; see the
-[S3 Block Public Access documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html).
-Use the bucket's default server-side encryption and add a lifecycle rule to
-expire temporary logs or raw staging objects after the course retention period.
+I kept S3 Block Public Access enabled. The bucket does not need to be public
+for grading because the code, documentation, and small final CSV files are in
+GitHub. I also used a separate EMR runtime role instead of putting AWS keys in
+the Python script.
 
-## IAM Design
+The real bucket name, account number, role ARN, and credentials are not stored
+in this repository.
 
-Create a dedicated EMR Serverless job runtime role with least-privilege access:
+## Checks Before Running on AWS
 
-- list the project bucket;
-- read `code/` and `data/raw/`;
-- read, write, and delete only under `data/processed/` and `results/` because
-  the pipeline uses overwrite mode;
-- write under `logs/`;
-- no access to unrelated buckets;
-- no credentials embedded in the script or command.
+I validated the full files locally before uploading them. The validation found:
 
-The person submitting the job also needs permission to pass only this runtime
-role to EMR Serverless. Do not commit the role ARN; represent it as
-`<execution-role-arn>` in documentation and example files.
+- 133,443,290 review rows;
+- 10,954,065 metadata rows;
+- no malformed rows;
+- no missing `parent_asin` values;
+- no duplicate metadata keys;
+- 100% join coverage for a deterministic sample of 133,683 reviews.
 
-## Pre-Deployment Gates
-
-The local full-scale input validation completed successfully on July 30, 2026.
-The complete results and reproduction command are in
+The full validation procedure is in
 [`data-validation.md`](data-validation.md).
 
-Completed gates:
+I kept the same analysis decisions used by the local pipeline. In particular,
+the helpful-vote cap stayed at 13 and the review-age reference date stayed at
+`2023-09-09`. The verified-purchase analysis uses all available years. I
+considered restricting it to 2018-2022 to reduce time-period differences, but
+I did not want to change the analysis while moving it to AWS.
 
-1. Both selected review and metadata files match the expected schemas and
-   contain no malformed rows or null join keys.
-2. All 10,954,065 combined metadata `parent_asin` values are unique, including
-   across category files. A metadata-deduplication rule is not required.
-3. A deterministic sample of 133,683 reviews achieved 100% metadata join
-   coverage.
-4. The exact Spark review count is 133,443,290, exceeding the 100-million-row
-   requirement.
+## EMR Serverless Settings
 
-Complete these remaining decisions and checks before the paid full-scale job:
+The successful run used:
 
-1. Decide whether the helpful-vote cap of 13 should remain a fixed local-study
-   value or be recomputed from the full dataset.
-2. Decide whether the fixed review-age reference date of `2023-09-09` remains
-   appropriate.
-3. Keep verified-purchase analysis unchanged for the first reproducibility
-   run. It currently uses all years. The 2018-2022 restriction should be a
-   separately approved analytical change, not mixed into deployment work.
-4. Confirm that no raw data, Parquet output, log, AWS CLI profile, or secret is
-   staged in Git.
+- Region: `us-east-1`
+- EMR release: `emr-7.13.0`
+- Spark version: 3.5.6
+- application limit: 16 vCPU, 64 GB memory, and 500 GB disk
+- driver: 4 vCPU and 14 GB memory
+- executor: 4 vCPU and 14 GB memory
+- dynamic allocation: 1 to 3 executors, starting with 3
+- no pre-initialized workers
+- automatic start enabled
+- automatic stop after five idle minutes
+- EMR dynamic-allocation optimization enabled
+- EMR Serverless shuffle storage enabled
 
-## Low-Cost Execution Sequence
+I chose EMR Serverless because this project already ran as a batch
+`spark-submit` job. I did not need to maintain an EC2 cluster, and the
+application stopped automatically when it was idle.
 
-1. Create the private S3 bucket, runtime role, and one EMR Serverless Spark
-   application in a single Region.
-2. Upload the reviewed pipeline script to `code/`.
-3. Upload split review JSONL objects and matching metadata to their raw
-   prefixes.
-4. Run a small S3 smoke test first, writing to isolated `smoke/` prefixes.
-5. Stop and inspect its logs, row counts, schemas, join count, and outputs.
-6. Submit the full 133.4-million-row run only after the S3 smoke test passes.
-7. Download or query only the small result CSVs for inspection.
-8. Stop the application and delete resources that are not needed for grading.
+## Job Arguments
 
-Do not configure pre-initialized capacity for this project. AWS charges for
-those workers while they wait. Leave automatic start enabled and reduce the
-idle auto-stop period from its default 15 minutes after verifying that the
-chosen EMR release supports the desired setting. See
-[EMR Serverless application behavior](https://docs.aws.amazon.com/emr/latest/EMR-Serverless-UserGuide/app-behavior.html)
-and [pre-initialized capacity guidance](https://docs.aws.amazon.com/emr/latest/EMR-Serverless-UserGuide/pre-init-capacity.html).
-
-Enable Spark dynamic allocation with a conservative maximum executor count and
-EMR Serverless dynamic allocation optimization. AWS states that this
-optimization can better reuse workers across stages and lower cost. Start with
-moderate workers, inspect the S3 smoke-test Spark UI and logs, and increase the
-maximum only if the job is demonstrably constrained. Exact worker sizing should
-be recorded with the final runtime rather than guessed in advance.
-
-## Full Job Arguments
-
-The EMR Serverless job should pass these entry-point arguments:
+The same Python script works locally and on S3 because its paths are command-line
+arguments. The cloud job used the following pattern:
 
 ```text
 --reviews-input
@@ -188,51 +108,123 @@ s3://<bucket-name>/data/raw/metadata/
 --processed-output-base
 s3://<bucket-name>/data/processed/
 --results-output-base
-s3://<bucket-name>/results/
+s3://<bucket-name>/results/full/
 ```
 
-Configure S3 monitoring logs at:
+The Spark sizing options were:
 
 ```text
-s3://<bucket-name>/logs/
+--conf spark.driver.cores=4
+--conf spark.driver.memory=14g
+--conf spark.driver.maxResultSize=2g
+--conf spark.executor.cores=4
+--conf spark.executor.memory=14g
+--conf spark.dynamicAllocation.enabled=true
+--conf spark.dynamicAllocation.initialExecutors=3
+--conf spark.dynamicAllocation.minExecutors=1
+--conf spark.dynamicAllocation.maxExecutors=3
 ```
 
-Do not paste credentials into the entry-point arguments. EMR Serverless reads
-and writes S3 through the job runtime role.
+## Smoke Test
 
-## Required Evidence and Validation
+Before paying for the full run, I submitted a small S3 smoke test. It used four
+reviews and two metadata rows. All four reviews joined successfully, and Spark
+wrote all expected Parquet and CSV folders. This confirmed that the IAM role,
+S3 paths, command-line arguments, and pipeline worked together.
 
-Capture the following for the final report:
+## First Full Attempt and Retry
 
-- source category names and official published counts;
-- Spark's exact raw review count, proving at least 100 million rows;
-- raw metadata count;
-- exact clean-review count after duplicate removal;
-- metadata count used for the join;
-- joined-review count and join coverage percentage;
-- selected EMR release and Spark version;
-- driver, executor, dynamic allocation, and maximum-capacity settings;
-- job ID, start time, end time, and runtime;
-- successful S3 output paths;
-- row counts or screenshots for all four final analyses;
-- Spark UI evidence for stages, tasks, shuffle, and any skew;
-- cost estimate before the job and actual AWS cost after billing appears;
-- cleanup actions and any intentionally retained resources.
+The first full attempt read, cleaned, joined, and analyzed the data, but it
+failed while writing `joined_reviews.parquet`. Spark reported:
 
-For optional Athena validation, query processed Parquet rather than raw JSON so
-that validation scans less data. Athena does not replace the required Spark
-processing step.
+```text
+Total size of serialized results ... is bigger than
+spark.driver.maxResultSize (1024.0 MiB)
+```
 
-## Reproducibility Order
+The task results were only slightly larger than Spark's default 1 GB driver
+limit. I did not change the cleaning or analysis code. I increased
+`spark.driver.maxResultSize` to `2g` and submitted the same job again.
 
-The final documented workflow should be reproducible in this order:
+The retry succeeded:
 
-1. obtain the two review categories and their matching metadata;
-2. split and upload raw files to the documented S3 prefixes;
-3. upload the exact committed pipeline version;
-4. create or select the documented EMR Serverless application;
-5. run the S3 smoke test;
-6. run the full job with the four path arguments;
-7. validate counts and outputs;
-8. record runtime and cost;
-9. stop compute and apply the documented cleanup policy.
+- job name: `cs675-full-133m-retry-2g`
+- job ID: `00g7kd3h6vnf7g0b`
+- start: July 31, 2026 at 01:40:17 UTC
+- end: July 31, 2026 at 02:44:52 UTC
+- runtime: 3,874 seconds (64 minutes 34 seconds)
+- final state: `SUCCESS`
+
+The application stopped automatically five minutes after it became idle.
+
+## Final Row Counts
+
+The final Spark log showed:
+
+| Metric | Count |
+| --- | ---: |
+| Raw reviews | 133,443,290 |
+| Raw metadata rows | 10,954,065 |
+| Clean reviews | 132,084,185 |
+| Clean metadata rows | 10,954,065 |
+| Joined reviews | 132,084,185 |
+
+The clean-review count and joined-review count are equal. This means every
+review remaining after deduplication found matching product metadata.
+
+I also checked the `_SUCCESS` marker for each output:
+
+- `data/processed/reviews_clean.parquet/`
+- `data/processed/metadata_clean.parquet/`
+- `data/processed/joined_reviews.parquet/`
+- `results/full/verified_analysis/`
+- `results/full/length_analysis/`
+- `results/full/popularity_analysis/`
+- `results/full/polarization_analysis/`
+
+The four small result tables are saved under `results/cloud_full/`. The two
+review-based tables both add up to 132,084,185 reviews. The polarization table
+covers 10,951,300 products.
+
+## Results I Noticed
+
+- Verified purchases made up 123,817,015 reviews, or 93.74% of the joined
+  data. Their average rating was 4.184, compared with 4.089 for unverified
+  reviews.
+- Unverified reviews were longer on average: 332.31 characters compared with
+  151.88 for verified reviews.
+- In the 2018-2022 length analysis, 60.29% of reviews with at least 600
+  characters had a helpful vote. Only 8.82% of reviews under 50 characters had
+  one.
+- Products with at least 1,000 ratings accounted for 62,982,170 reviews and
+  had an average rating of 4.202.
+- Average rating variation increased with popularity. The mean rating standard
+  deviation was 0.881 for products with fewer than 10 ratings and 1.141 for
+  products with at least 1,000 ratings.
+
+## Cost
+
+AWS reported 17.144 vCPU-hours, 68.578 GB-memory-hours, and 85.722
+GB-storage-hours for the successful retry. Using the public `us-east-1` vCPU
+and memory rates, I estimate the EMR compute cost at about $1.30 before
+credits. This is an estimate, not the final bill, and it does not include the
+smaller S3 storage and request charges.
+
+Current prices are available on the
+[EMR pricing page](https://aws.amazon.com/emr/pricing/).
+
+## How to Reproduce the Cloud Run
+
+1. Download the two review categories and their matching metadata.
+2. Run `scripts/validate_full_dataset.py` locally.
+3. Create a private S3 bucket and an EMR Serverless runtime role.
+4. Upload `src/amazon_reviews_pipeline.py` to `code/`.
+5. Upload the review and metadata JSONL files to their S3 raw folders.
+6. Create an EMR Serverless Spark application with the settings above.
+7. Run a small S3 smoke test.
+8. Submit the full job with the four path arguments and Spark settings above.
+9. Check the row counts, logs, `_SUCCESS` files, and CSV contents.
+10. Confirm that the EMR application stops after the job.
+
+Raw JSONL files, Parquet outputs, logs, credentials, and environment files must
+stay outside Git.

@@ -1,0 +1,6 @@
+text_length_bin,review_count,avg_rating,percent_with_helpful_vote,avg_helpful_votes_per_year
+600+,2629373,3.875,60.29,2.178
+Under 50,26452876,4.432,8.82,0.076
+150-299,18416684,3.965,26.49,0.366
+300-599,8644592,3.88,41.95,0.801
+50-149,33371569,4.159,15.62,0.162

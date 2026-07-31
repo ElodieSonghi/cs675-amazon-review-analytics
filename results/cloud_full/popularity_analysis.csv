@@ -1,0 +1,6 @@
+product_popularity_bin,review_count,avg_review_rating,avg_text_length,percent_with_helpful_vote,avg_helpful_votes_per_year
+10-49 ratings,14166366,4.147,177.31,24.22,0.19
+1000+ ratings,62982170,4.202,158.04,18.14,0.343
+Under 10 ratings,8269037,4.07,159.8,19.83,0.117
+50-199 ratings,18445066,4.168,172.16,26.7,0.274
+200-999 ratings,28221546,4.179,162.63,25.44,0.333

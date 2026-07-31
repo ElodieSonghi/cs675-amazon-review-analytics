@@ -2,11 +2,11 @@
 
 ## Project Goal
 
-This project will use Apache Spark to analyze large-scale Amazon product
-review data and product metadata.
+I used Apache Spark to analyze Amazon product reviews and product metadata,
+first locally and then with AWS EMR Serverless.
 
-The project will examine how product category, price, verified-purchase
-status, and time relate to ratings, review helpfulness, and review volume.
+I focused on verified purchases, review length, product popularity, review
+helpfulness, and rating polarization.
 
 ## Datasets
 
@@ -15,27 +15,27 @@ status, and time relate to ratings, review helpfulness, and review volume.
 
 ## Join Key
 
-The two datasets will be joined using:
+I joined the two datasets using:
 
 reviews.parent_asin = metadata.parent_asin
 
 ## Research Questions
 
-1. How do product category and price relate to review ratings and helpful votes?
-2. Do verified-purchase reviews differ from unverified reviews?
-3. How do review volume and average ratings change over time?
+1. Do verified-purchase reviews differ from unverified reviews?
+2. How does review length relate to ratings and helpfulness?
+3. How does product popularity relate to review outcomes?
 4. Are highly reviewed products more likely to have polarized ratings?
 
-## Local Development Plan
+## Local Development
 
-A smaller Amazon product category will be used for testing and development.
+I developed and tested the pipeline with the smaller `All_Beauty` category,
+which has 701,528 raw reviews.
 
-The local dataset will contain approximately 1 to 5 million reviews.
+## Cloud-Scale Execution
 
-## Cloud-Scale Plan
-
-The AWS version will process at least 100 million review records across
-multiple product categories.
+For the AWS run, I used 133,443,290 reviews from two categories and 10,954,065
+metadata rows. After removing duplicates, Spark joined all 132,084,185 clean
+reviews to metadata.
 
 ## Technologies
 
@@ -44,25 +44,29 @@ multiple product categories.
 - Parquet
 - GitHub
 - Amazon S3
-- AWS EMR or AWS Glue
+- Amazon EMR Serverless
 
-## Planned Preprocessing
+## Implemented Preprocessing
 
 - Remove duplicate records
-- Validate rating values
 - Parse review timestamps
-- Handle missing product prices
 - Process verified-purchase status
 - Calculate review-text length
-- Create product price ranges
-- Detect extreme helpful-vote values
+- Cap extreme helpful-vote values
+- Standardize review text length
+- Create missing-value indicators
+- Create product-popularity bins
 - Convert source data to Parquet
 
-## Planned Performance Testing
+## Final Run
 
-- JSON versus Parquet
-- Unpartitioned versus partitioned data
-- Filtering before versus after joins
-- Default join versus optimized join
-- Repartitioning by parent_asin
-- Analysis of data skew
+The final run used EMR Serverless and finished in 64 minutes 34 seconds. It:
+
+- exceeded the 100-million-row requirement;
+- joined reviews and metadata using `parent_asin`;
+- wrote three processed Parquet datasets;
+- wrote four analytical CSV result tables;
+- automatically stopped the EMR application after completion.
+
+Detailed evidence and reproduction instructions are in
+[`cloud-plan.md`](cloud-plan.md).
