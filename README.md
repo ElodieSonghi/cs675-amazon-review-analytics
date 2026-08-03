@@ -17,6 +17,15 @@ this repository.
 
 The current local prototype uses the Amazon Reviews 2023 `All_Beauty` category.
 
+The source data is published by the McAuley Lab:
+
+- [Amazon Reviews 2023 dataset page](https://amazon-reviews-2023.github.io/main.html)
+- [Amazon Reviews 2023 on Hugging Face](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023)
+
+The raw files are not included in Git because they are large. Download the
+review and matching metadata files from the dataset source and place them in
+the local paths shown below.
+
 ### Input files
 
 - `data/raw/All_Beauty.jsonl`
@@ -67,17 +76,52 @@ data/
     raw/
     processed/
 docs/
+    cloud-plan.md
+    data-validation.md
+    project-scope.md
 notebooks/
     01_data_inspection.ipynb
 results/
+    cloud_full/
+scripts/
+    run_local_smoke_test.sh
+    validate_full_dataset.py
 src/
     amazon_reviews_pipeline.py
+.gitignore
 README.md
 ```
 
 ## Local Environment
 
-The project runs inside a Docker container using the Jupyter PySpark image.
+### Prerequisites
+
+- Docker Desktop
+- Git
+- approximately 2 GB of free disk space for the local `All_Beauty` prototype
+- substantially more local or S3 storage for the two full-scale categories
+
+The project was tested with Spark 3.5.0 in this Docker image:
+
+```text
+jupyter/pyspark-notebook@sha256:58377aaa152b741e244f201679f96d909a024ea337088cc276b0ee32ab3f076f
+```
+
+From the repository root on macOS, create and start the tested container with:
+
+```bash
+docker run --name cs675-spark \
+    -p 8888:8888 \
+    -v "$(pwd):/home/jovyan/work" \
+    jupyter/pyspark-notebook@sha256:58377aaa152b741e244f201679f96d909a024ea337088cc276b0ee32ab3f076f
+```
+
+If the container already exists but is stopped, restart it with:
+
+```bash
+docker start -a cs675-spark
+```
+
 The local project folder is mounted into the container at:
 
 ```text
@@ -190,6 +234,12 @@ before credits. This does not include the much smaller S3 charges.
 
 The AWS setup, retry, and commands are documented in
 [`docs/cloud-plan.md`](docs/cloud-plan.md).
+
+The AWS resources were configured manually in the AWS console rather than
+with Terraform or CloudFormation. The cloud guide records the S3 layout, EMR
+Serverless settings, Spark arguments, validation steps, and reproduction
+procedure. Account numbers, bucket names, role ARNs, and credentials are
+intentionally omitted.
 
 ## Notebook and Script Roles
 
